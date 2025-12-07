@@ -1,39 +1,294 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>SSE Demo</title>
+    <title>Stock Dashboard</title>
     <meta charset="utf-8" />
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+        background-color: #f5f5f5;
+      }
+      h1 {
+        color: #333;
+        text-align: center;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background-color: white;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin: 20px auto;
+      }
+      th, td {
+        padding: 12px;
+        text-align: left;
+        border-bottom: 1px solid #ddd;
+      }
+      th {
+        background-color: #4CAF50;
+        color: white;
+        font-weight: bold;
+      }
+      tr:hover {
+        background-color: #f5f5f5;
+      }
+      .sparkline-container {
+        width: 200px;
+        height: 50px;
+      }
+      .price {
+        font-weight: bold;
+        color: #2c3e50;
+      }
+      .volume {
+        color: #7f8c8d;
+      }
+    </style>
   </head>
   <body>
     <div id="app"></div>
-    <script src="react/react.js"></script>
-    <script src="react/react-dom.js"></script>
-    <script src="react/babel.js"></script>
     <script type="text/babel">
 
-      const useState = React.useState;
-      const useEffect = React.useEffect;
-      
-      function App() {
-	  const [time, setTime] = useState('');
-	  useEffect(() => {
-              const eventSource = new EventSource('http://localhost:5000/events');
-              eventSource.onmessage = (event) => {
-		  const data = JSON.parse(event.data);
-		  setTime(data.time);
-              };
-              return () => eventSource.close();
-	  }, []);
-	  return (
-		  <div>
-		  <h1>Server-Sent Events Demo</h1>
-		  <p>Current Time: {time}</p>
-		  </div>
-	  );
+      const { useState, useEffect, useRef } = React;
+
+      // Fixed-length queue class to hold price values
+      class FixedQueue {
+        constructor(size) {
+          this.size = size;
+          this.queue = [];
+        }
+        
+        push(value) {
+          this.queue.push(value);
+          if (this.queue.length > this.size) {
+            this.queue.shift();
+          }
+        }
+        
+        getValues() {
+          return this.queue;
+        }
+        
+        clear() {
+          this.queue = [];
+        }
       }
+
+      function App() {
+        // Initialize state for four stocks with JSON objects
+        const [amznData, setAmzn] = useState({
+          ticker: "AMZN",
+          name: "Amazon",
+          price: 0,
+          volume: 0
+        });
+        const [ibmData, setIbm] = useState({
+          ticker: "IBM",
+          name: "International Business Machines",
+          price: 0,
+          volume: 0
+        });
+        const [dowData, setDow] = useState({
+          ticker: "DOW",
+          name: "Dow Jones Industrial Average",
+          price: 0,
+          volume: 0
+        });
+        const [nasdaqData, setNasdaq] = useState({
+          ticker: "NASDAQ",
+          name: "Nasdaq Composite",
+          price: 0,
+          volume: 0
+        });
+
+        // Initialize price queues for sparklines using refs
+        const amznPrices = useRef(new FixedQueue(500));
+        const ibmPrices = useRef(new FixedQueue(500));
+        const dowPrices = useRef(new FixedQueue(500));
+        const nasdaqPrices = useRef(new FixedQueue(500));
+
+        // Function to update sparkline using D3
+        const updateSparkline = (ticker, priceQueue) => {
+          const containerId = `sparkline-${ticker}`;
+          const container = document.getElementById(containerId);
+          
+          if (!container) return;
+          
+          // Clear existing sparkline (delete old one before drawing new one)
+          container.innerHTML = '';
+          
+          const values = priceQueue.getValues();
+          if (values.length < 2) return;
+          
+          const width = 200;
+          const height = 50;
+          const padding = 5;
+          
+          const svg = d3.select(container)
+            .append('svg')
+            .attr('width', width)
+            .attr('height', height);
+          
+          const xScale = d3.scaleLinear()
+            .domain([0, values.length - 1])
+            .range([padding, width - padding]);
+          
+          const yScale = d3.scaleLinear()
+            .domain(d3.extent(values))
+            .range([height - padding, padding]);
+          
+          const line = d3.line()
+            .x((d, i) => xScale(i))
+            .y(d => yScale(d))
+            .curve(d3.curveMonotoneX);
+          
+          svg.append('path')
+            .datum(values)
+            .attr('fill', 'none')
+            .attr('stroke', '#4CAF50')
+            .attr('stroke-width', 2)
+            .attr('d', line);
+        };
+
+        useEffect(() => {
+          const eventSource = new EventSource('http://localhost:31415/stocks');
+          
+          eventSource.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            
+            // Determine which stock it is, call its setState function, and update the sparkline
+            switch(data.ticker) {
+              case 'AMZN':
+                amznPrices.current.push(data.price);
+                setAmzn({
+                  ticker: data.ticker,
+                  name: data.name,
+                  price: data.price,
+                  volume: data.volume
+                });
+                break;
+              case 'IBM':
+                ibmPrices.current.push(data.price);
+                setIbm({
+                  ticker: data.ticker,
+                  name: data.name,
+                  price: data.price,
+                  volume: data.volume
+                });
+                break;
+              case 'DOW':
+                dowPrices.current.push(data.price);
+                setDow({
+                  ticker: data.ticker,
+                  name: data.name,
+                  price: data.price,
+                  volume: data.volume
+                });
+                break;
+              case 'NASDAQ':
+                nasdaqPrices.current.push(data.price);
+                setNasdaq({
+                  ticker: data.ticker,
+                  name: data.name,
+                  price: data.price,
+                  volume: data.volume
+                });
+                break;
+            }
+          };
+          
+          eventSource.onerror = (error) => {
+            console.error('SSE error:', error);
+          };
+          
+          return () => {
+            eventSource.close();
+          };
+        }, []);
+
+        // Update sparklines when data changes (after DOM updates)
+        useEffect(() => {
+          // Use setTimeout to ensure DOM is updated before drawing sparkline
+          setTimeout(() => updateSparkline('AMZN', amznPrices.current), 0);
+        }, [amznData]);
+        
+        useEffect(() => {
+          setTimeout(() => updateSparkline('IBM', ibmPrices.current), 0);
+        }, [ibmData]);
+        
+        useEffect(() => {
+          setTimeout(() => updateSparkline('DOW', dowPrices.current), 0);
+        }, [dowData]);
+        
+        useEffect(() => {
+          setTimeout(() => updateSparkline('NASDAQ', nasdaqPrices.current), 0);
+        }, [nasdaqData]);
+
+        return (
+          <div>
+            <h1>Stock Dashboard</h1>
+            <table>
+              <thead>
+                <tr>
+                  <th>Ticker</th>
+                  <th>Name</th>
+                  <th>Price</th>
+                  <th>Volume</th>
+                  <th>Sparkline</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>{amznData.ticker}</td>
+                  <td>{amznData.name}</td>
+                  <td className="price">${amznData.price.toLocaleString()}</td>
+                  <td className="volume">{amznData.volume.toLocaleString()}</td>
+                  <td>
+                    <div id="sparkline-AMZN" className="sparkline-container"></div>
+                  </td>
+                </tr>
+                <tr>
+                  <td>{ibmData.ticker}</td>
+                  <td>{ibmData.name}</td>
+                  <td className="price">${ibmData.price.toLocaleString()}</td>
+                  <td className="volume">{ibmData.volume.toLocaleString()}</td>
+                  <td>
+                    <div id="sparkline-IBM" className="sparkline-container"></div>
+                  </td>
+                </tr>
+                <tr>
+                  <td>{dowData.ticker}</td>
+                  <td>{dowData.name}</td>
+                  <td className="price">${dowData.price.toLocaleString()}</td>
+                  <td className="volume">{dowData.volume.toLocaleString()}</td>
+                  <td>
+                    <div id="sparkline-DOW" className="sparkline-container"></div>
+                  </td>
+                </tr>
+                <tr>
+                  <td>{nasdaqData.ticker}</td>
+                  <td>{nasdaqData.name}</td>
+                  <td className="price">${nasdaqData.price.toLocaleString()}</td>
+                  <td className="volume">{nasdaqData.volume.toLocaleString()}</td>
+                  <td>
+                    <div id="sparkline-NASDAQ" className="sparkline-container"></div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        );
+      }
+
       ReactDOM.render(
-              <App />,
-	  document.getElementById('app'));
+        <App />,
+        document.getElementById('app')
+      );
     </script>
   </body>
 </html>
