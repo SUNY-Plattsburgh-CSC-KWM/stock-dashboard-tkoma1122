@@ -129,6 +129,11 @@
           const height = 50;
           const padding = 5;
           
+          // Determine trend color (green for up, red for down)
+          const firstPrice = values[0];
+          const lastPrice = values[values.length - 1];
+          const trendColor = lastPrice >= firstPrice ? '#4CAF50' : '#f44336';
+          
           const svg = d3.select(container)
             .append('svg')
             .attr('width', width)
@@ -150,7 +155,7 @@
           svg.append('path')
             .datum(values)
             .attr('fill', 'none')
-            .attr('stroke', '#4CAF50')
+            .attr('stroke', trendColor)
             .attr('stroke-width', 2)
             .attr('d', line);
         };
